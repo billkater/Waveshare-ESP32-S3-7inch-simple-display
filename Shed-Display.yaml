@@ -102,7 +102,7 @@ touchscreen:
       ch422g:
       number: 1
 
-    transform:
+    transform:               # Needed to swap touch screen points due to screen rotation
       swap_xy: True
       mirror_y: True
 
