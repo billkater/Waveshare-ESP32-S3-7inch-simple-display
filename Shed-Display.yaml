@@ -1,0 +1,954 @@
+# For Waveshare 7" ESP32 board.
+
+substitutions:
+  device_internal_name: esphome19
+  device_wifi_name: esphome-19
+  device_friendly_name: ESPHome 19
+  device_ip_address: 192.168.1.118
+
+esphome:
+  name: wave-7
+  friendly_name: ${device_friendly_name}
+  platformio_options:
+    build_unflags: -Werror=all
+    board_build.flash_mode: dio
+
+
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: esp-idf
+#    platform_version: 6.8.1
+#    version: 5.3.0
+    sdkconfig_options:
+      CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: "y"
+      CONFIG_ESP32S3_DATA_CACHE_64KB: "y"
+      CONFIG_SPIRAM_FETCH_INSTRUCTIONS: y
+      CONFIG_SPIRAM_RODATA: y
+
+
+##################################################################
+###  Home Assistant API Key  ###
+
+api:
+  reboot_timeout: 0s
+  encryption:
+    key: !secret api_encryption_key
+
+logger:
+  hardware_uart: UART0
+
+###################################################################
+###  WiFi setup  ###
+
+wifi:
+  networks:
+    - ssid: !secret wifi_ssid
+      password: !secret wifi_password
+
+
+#####################################################################
+###  OTA update setup  ###
+
+ota:
+  platform: esphome
+  password: !secret ota_password
+
+ch422g:
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+output:
+  - platform: ledc
+    id: backlight_output
+    pin: 13
+    frequency: 1220Hz
+    inverted: true
+
+# Note: this requires a hardware modification to work - GPIO 13 must be connected to the backlight PWM pad.
+
+light:
+  - platform: monochromatic
+    output: backlight_output
+    name: LCD Backlight
+    id: lcd_backlight
+    restore_mode: ALWAYS_ON
+    default_transition_length: 0s
+    gamma_correct: 1.8
+    effects:
+      - pulse:
+
+i2c:
+  sda: 8
+  scl: 9
+  frequency: 400kHz
+  scan: false
+  id: bus_a
+
+button:
+  - platform: safe_mode
+    name: Safe Mode Boot
+    entity_category: diagnostic
+
+touchscreen:
+  - platform: gt911
+    address: 0x5D
+    id: my_touchscreen
+    display: rpi_disp      # ← REQUIRED
+    interrupt_pin: 4
+    reset_pin:
+      ch422g:
+      number: 1
+
+    transform:
+      swap_xy: True
+      mirror_y: True
+
+
+display:
+  - platform: rpi_dpi_rgb
+    id: rpi_disp
+    rotation: 90
+    auto_clear_enabled: false
+    color_order: RGB
+    pclk_frequency: 16MHz
+    dimensions:
+      width: 800
+      height: 480
+    reset_pin:
+      ch422g:
+      number: 3
+    enable_pin:
+      ch422g:
+      number: 2
+    de_pin:
+      number: 5
+    hsync_pin:
+      number: 46
+      ignore_strapping_warning: true
+    vsync_pin:
+      number: 3
+      ignore_strapping_warning: true
+    pclk_pin: 7
+    pclk_inverted: true
+    hsync_back_porch: 8
+    hsync_front_porch: 8
+    hsync_pulse_width: 4
+    vsync_back_porch: 16
+    vsync_front_porch: 16
+    vsync_pulse_width: 4
+
+
+    data_pins:
+      red:
+        - 1         #r3
+        - 2         #r4
+        - 42        #r5
+        - 41        #r6
+        - 40        #r7
+      blue:
+        - 14        #b3
+        - 38        #b4
+        - 18        #b5
+        - 17        #b6
+        - 10        #b7
+      green:
+        - 39        #g2
+        - 0         #g3
+        - 45        #g4
+        - 48        #g5
+        - 47        #g6
+        - 21        #g7
+
+image:
+  - file: "images/background.jpg"
+    id: bg_image
+    type: RGB565
+    resize: 480x800
+
+
+
+
+####################################################################################
+### Fonts ###
+
+font:
+  - file: "gfonts://Roboto"
+    id: font_small
+    size: 14
+
+  - file: "fonts/materialdesignicons-webfont.ttf"
+    id: mdi_garage
+    size: 100           
+    glyphs:
+      - "\U000F12D3"  # garage-open
+      - "\U000F12D4"  # garage-closed
+
+  - file: "fonts/materialdesignicons-webfont.ttf"
+    id: mdi_lock
+    size: 80
+    glyphs:
+      - "\U000F0CCC"  # shield-lock-outline
+      - "\U000F199A"  # shield-outline
+
+
+###########################################################################################
+### Garage doors ###
+
+
+text_sensor:
+  - platform: homeassistant
+    id: shed_door_state_1                    #####   DOOR 1
+    entity_id: cover.shed_door_1_4
+    on_value:
+      then:
+        - lambda: |-
+            auto state = x.c_str();
+            if (strcmp(state, "open") == 0) {
+              lv_label_set_text(id(shed_garage_icon_1), "\U000F12D4"); // open icon
+              lv_obj_set_style_text_color(id(shed_garage_icon_1), lv_color_make(255, 0, 0), LV_PART_MAIN); // red
+              lv_label_set_text(id(shed_garage_status_1), "Open");
+            } else if (strcmp(state, "opening") == 0) {
+              lv_label_set_text(id(shed_garage_status_1), "Opening");
+              lv_obj_set_style_text_color(id(shed_garage_icon_1), lv_color_make(255, 165, 0), LV_PART_MAIN); // orange
+            } else if (strcmp(state, "closing") == 0) {
+              lv_label_set_text(id(shed_garage_status_1), "Closing");
+              lv_obj_set_style_text_color(id(shed_garage_icon_1), lv_color_make(255, 165, 0), LV_PART_MAIN); // orange
+            } else {
+              lv_label_set_text(id(shed_garage_icon_1), "\U000F12D3"); // closed icon
+              lv_obj_set_style_text_color(id(shed_garage_icon_1), lv_color_make(0, 200, 0), LV_PART_MAIN); // green
+              lv_label_set_text(id(shed_garage_status_1), "Closed");
+            }
+
+
+  - platform: homeassistant
+    id: shed_door_state_2             #   DOOR 2
+    entity_id: cover.shed_door_2_5
+    on_value:
+      then:
+        - lambda: |-
+            auto state = x.c_str();
+            if (strcmp(state, "open") == 0) {
+              lv_label_set_text(id(shed_garage_icon_2), "\U000F12D4"); // open icon
+              lv_obj_set_style_text_color(id(shed_garage_icon_2), lv_color_make(255, 0, 0), LV_PART_MAIN); // red
+              lv_label_set_text(id(shed_garage_status_2), "Open");
+            } else if (strcmp(state, "opening") == 0) {
+              lv_label_set_text(id(shed_garage_status_2), "Opening");
+              lv_obj_set_style_text_color(id(shed_garage_icon_2), lv_color_make(255, 165, 0), LV_PART_MAIN); // orange
+            } else if (strcmp(state, "closing") == 0) {
+              lv_label_set_text(id(shed_garage_status_2), "Closing");
+              lv_obj_set_style_text_color(id(shed_garage_icon_2), lv_color_make(255, 165, 0), LV_PART_MAIN); // orange
+            } else {
+              lv_label_set_text(id(shed_garage_icon_2), "\U000F12D3"); // closed icon
+              lv_obj_set_style_text_color(id(shed_garage_icon_2), lv_color_make(0, 200, 0), LV_PART_MAIN); // green
+              lv_label_set_text(id(shed_garage_status_2), "Closed");
+            }
+
+
+  - platform: homeassistant
+    id: shed_door_state_3             #   DOOR 3
+    entity_id: cover.shed_door_3_6
+    on_value:
+      then:
+        - lambda: |-
+            auto state = x.c_str();
+            if (strcmp(state, "open") == 0) {
+              lv_label_set_text(id(shed_garage_icon_3), "\U000F12D4"); // open icon
+              lv_obj_set_style_text_color(id(shed_garage_icon_3), lv_color_make(255, 0, 0), LV_PART_MAIN); // red
+              lv_label_set_text(id(shed_garage_status_3), "Open");
+            } else if (strcmp(state, "opening") == 0) {
+              lv_label_set_text(id(shed_garage_status_3), "Opening");
+              lv_obj_set_style_text_color(id(shed_garage_icon_3), lv_color_make(255, 165, 0), LV_PART_MAIN); // orange
+            } else if (strcmp(state, "closing") == 0) {
+              lv_label_set_text(id(shed_garage_status_3), "Closing");
+              lv_obj_set_style_text_color(id(shed_garage_icon_3), lv_color_make(255, 165, 0), LV_PART_MAIN); // orange
+            } else {
+              lv_label_set_text(id(shed_garage_icon_3), "\U000F12D3"); // closed icon
+              lv_obj_set_style_text_color(id(shed_garage_icon_3), lv_color_make(0, 200, 0), LV_PART_MAIN); // green
+              lv_label_set_text(id(shed_garage_status_3), "Closed");
+            }
+
+
+  - platform: homeassistant
+    id: shed_door_state_4             #   DOOR 4
+    entity_id: cover.shed_door_4_7
+    on_value:
+      then:
+        - lambda: |-
+            auto state = x.c_str();
+            if (strcmp(state, "open") == 0) {
+              lv_label_set_text(id(shed_garage_icon_4), "\U000F12D4"); // open icon
+              lv_obj_set_style_text_color(id(shed_garage_icon_4), lv_color_make(255, 0, 0), LV_PART_MAIN); // red
+              lv_label_set_text(id(shed_garage_status_4), "Open");
+            } else if (strcmp(state, "opening") == 0) {
+              lv_label_set_text(id(shed_garage_status_4), "Opening");
+              lv_obj_set_style_text_color(id(shed_garage_icon_4), lv_color_make(255, 165, 0), LV_PART_MAIN); // orange
+            } else if (strcmp(state, "closing") == 0) {
+              lv_label_set_text(id(shed_garage_status_4), "Closing");
+              lv_obj_set_style_text_color(id(shed_garage_icon_4), lv_color_make(255, 165, 0), LV_PART_MAIN); // orange
+            } else {
+              lv_label_set_text(id(shed_garage_icon_4), "\U000F12D3"); // closed icon
+              lv_obj_set_style_text_color(id(shed_garage_icon_4), lv_color_make(0, 200, 0), LV_PART_MAIN); // green
+              lv_label_set_text(id(shed_garage_status_4), "Closed");
+            }
+
+
+  - platform: homeassistant
+    id: shed_door_state_5             #   WEST DOOR
+    entity_id: cover.shed_door_west_3
+    on_value:
+      then:
+        - lambda: |-
+            auto state = x.c_str();
+            if (strcmp(state, "open") == 0) {
+              lv_label_set_text(id(shed_garage_icon_5), "\U000F12D4"); // open icon
+              lv_obj_set_style_text_color(id(shed_garage_icon_5), lv_color_make(255, 0, 0), LV_PART_MAIN); // red
+              lv_label_set_text(id(shed_garage_status_5), "Open");
+            } else if (strcmp(state, "opening") == 0) {
+              lv_label_set_text(id(shed_garage_status_5), "Opening");
+              lv_obj_set_style_text_color(id(shed_garage_icon_5), lv_color_make(255, 165, 0), LV_PART_MAIN); // orange
+            } else if (strcmp(state, "closing") == 0) {
+              lv_label_set_text(id(shed_garage_status_5), "Closing");
+              lv_obj_set_style_text_color(id(shed_garage_icon_5), lv_color_make(255, 165, 0), LV_PART_MAIN); // orange
+            } else {
+              lv_label_set_text(id(shed_garage_icon_5), "\U000F12D3"); // closed icon
+              lv_obj_set_style_text_color(id(shed_garage_icon_5), lv_color_make(0, 200, 0), LV_PART_MAIN); // green
+              lv_label_set_text(id(shed_garage_status_5), "Closed");
+            }
+
+
+
+
+  - platform: homeassistant
+    id: shop_door_state               #    Shop Door
+    entity_id: cover.shop_garage_door_shop_garage_door
+    on_value:
+      then:
+        - lambda: |-
+            // This part changes the ICON and COLOR based on state
+            if (x == "open") {
+              lv_label_set_text(id(shed_garage_icon_6), "\U000F12D4"); // Open icon
+              lv_obj_set_style_text_color(id(shed_garage_icon_6), lv_color_make(255, 0, 0), LV_PART_MAIN); // Red
+              lv_label_set_text(id(shed_garage_status_6), "Open");
+            } else if (x == "closed") {
+              lv_label_set_text(id(shed_garage_icon_6), "\U000F12D3"); // Closed icon
+              lv_obj_set_style_text_color(id(shed_garage_icon_6), lv_color_make(0, 200, 0), LV_PART_MAIN); // Green
+              lv_label_set_text(id(shed_garage_status_6), "Closed");
+            } else {
+              lv_obj_set_style_text_color(id(shed_garage_icon_6), lv_color_make(255, 165, 0), LV_PART_MAIN); // Orange (Opening/Closing)
+              lv_label_set_text(id(shed_garage_status_6), x.c_str());
+            }
+
+##################################################################################
+################        Door Locks
+
+  - platform: homeassistant          # Front Door Lock
+    id: front_door_state
+    entity_id: lock.front_door_lock_6
+    on_value:
+      then:
+        - lambda: |-
+            if (x == "locked") {
+              // --- LOCKED: Green Icon ---
+              lv_label_set_text(id(front_door_icon), "\U000F0CCC");
+              lv_obj_set_style_text_color(id(front_door_icon), lv_color_hex(0x00C800), LV_PART_MAIN); 
+              lv_label_set_text(id(front_door_status), "Locked");
+            } else {
+              // --- UNLOCKED: Red Icon ---
+              lv_label_set_text(id(front_door_icon), "\U000F199A");
+              lv_obj_set_style_text_color(id(front_door_icon), lv_color_hex(0xC80000), LV_PART_MAIN); 
+              lv_label_set_text(id(front_door_status), "Unlocked");
+            }
+
+
+
+  - platform: homeassistant        #  Back Door
+    id: back_door_state
+    entity_id: lock.back_door_lock_13
+    on_value:
+      then:
+        - lambda: |-
+            if (x == "locked") {
+              // --- LOCKED: Green Icon ---
+              lv_label_set_text(id(back_door_icon), "\U000F0CCC");
+              lv_obj_set_style_text_color(id(back_door_icon), lv_color_hex(0x00C800), LV_PART_MAIN); 
+              lv_label_set_text(id(back_door_status), "Locked");
+            } else {
+              // --- UNLOCKED: Red Icon ---
+              lv_label_set_text(id(back_door_icon), "\U000F199A");
+              lv_obj_set_style_text_color(id(back_door_icon), lv_color_hex(0xC80000), LV_PART_MAIN); 
+              lv_label_set_text(id(back_door_status), "Unlocked");
+            }
+
+
+
+  - platform: homeassistant        # Shed West Door
+    id: shed_west_door_state
+    entity_id: lock.touchpad_electronic_deadbolt
+    on_value:
+      then:
+        - lambda: |-
+            if (x == "locked") {
+              // --- LOCKED: Green Icon ---
+              lv_label_set_text(id(west_door_icon), "\U000F0CCC");
+              lv_obj_set_style_text_color(id(west_door_icon), lv_color_hex(0x00C800), LV_PART_MAIN); 
+              lv_label_set_text(id(west_door_status), "Locked");
+            } else {
+              // --- UNLOCKED: Red Icon ---
+              lv_label_set_text(id(west_door_icon), "\U000F199A");
+              lv_obj_set_style_text_color(id(west_door_icon), lv_color_hex(0xC80000), LV_PART_MAIN); 
+              lv_label_set_text(id(west_door_status), "Unlocked");
+            }
+
+
+  - platform: homeassistant       # Shed East Door
+    id: shed_east_door_state
+    entity_id: lock.shed_east_door_lock_2
+    on_value:
+      then:
+        - lambda: |-
+            if (x == "locked") {
+              // --- LOCKED: Green Icon ---
+              lv_label_set_text(id(east_door_icon), "\U000F0CCC");
+              lv_obj_set_style_text_color(id(east_door_icon), lv_color_hex(0x00C800), LV_PART_MAIN); 
+              lv_label_set_text(id(east_door_status), "Locked");
+            } else {
+              // --- UNLOCKED: Red Icon ---
+              lv_label_set_text(id(east_door_icon), "\U000F199A");
+              lv_obj_set_style_text_color(id(east_door_icon), lv_color_hex(0xC80000), LV_PART_MAIN); 
+              lv_label_set_text(id(east_door_status), "Unlocked");
+            }
+
+
+######################################################################
+####################### Lock Template 
+
+lock:
+  - platform: template           # Front Door Lock
+    name: "Front Door Lock"
+    id: front_door_lock
+    lambda: |-
+      return (id(front_door_state).state == "locked") ? lock::LOCK_STATE_LOCKED : lock::LOCK_STATE_UNLOCKED;
+    lock_action:
+      - homeassistant.service:
+          service: lock.lock
+          data: {entity_id: lock.front_door_lock_6}
+    unlock_action:
+      - homeassistant.service:
+          service: lock.unlock
+          data: {entity_id: lock.front_door_lock_6}
+
+  - platform: template       # Back Door
+    name: "Back Door Lock"
+    id: back_door_lock_proxy
+    lambda: |-
+      return (id(back_door_state).state == "locked") ? lock::LOCK_STATE_LOCKED : lock::LOCK_STATE_UNLOCKED;
+    lock_action:
+      - homeassistant.service:
+          service: lock.lock
+          data: {entity_id: lock.back_door_lock_13}
+    unlock_action:
+      - homeassistant.service:
+          service: lock.unlock
+          data: {entity_id: lock.back_door_lock_13}
+
+ 
+  - platform: template         # Shed West Door
+    name: "Shed West Door"
+    id: shed_west_door
+    lambda: |-
+      if (id(shed_west_door_state).state == "locked") {
+        return lock::LOCK_STATE_LOCKED;
+      } else {
+        return lock::LOCK_STATE_UNLOCKED;
+      }
+    lock_action:
+      - homeassistant.service:
+          service: lock.lock
+          data: {entity_id: lock.touchpad_electronic_deadbolt}
+    unlock_action:
+      - homeassistant.service:
+          service: lock.unlock
+          data: {entity_id: lock.touchpad_electronic_deadbolt}
+
+
+  - platform: template         # Shed East Door
+    name: "Shed East Door"
+    id: shed_east_door
+    lambda: |-
+      if (id(shed_east_door_state).state == "locked") {
+        return lock::LOCK_STATE_LOCKED;
+      } else {
+        return lock::LOCK_STATE_UNLOCKED;
+      }
+    lock_action:
+      - homeassistant.service:
+          service: lock.lock
+          data: {entity_id: lock.shed_east_door_lock_2}
+    unlock_action:
+      - homeassistant.service:
+          service: lock.unlock
+          data: {entity_id: lock.shed_east_door_lock_2}
+
+
+
+lvgl:
+  pages:
+    - id: main_page
+      widgets:
+        - obj:        #    Main Box
+            width: 480
+            height: 800
+            bg_opa: LV_OPA_TRANSP
+            bg_image_src: bg_image 
+            border_width: 0
+            pad_all: 0
+            scrollbar_mode: "OFF" 
+            layout:
+              type: flex
+              flex_flow: LV_FLEX_FLOW_ROW 
+              flex_align_main: LV_FLEX_ALIGN_SPACE_BETWEEN
+              flex_align_cross: LV_FLEX_ALIGN_CENTER 
+
+
+            widgets:
+                         # Column 1
+              - obj:        
+                  width: lv_pct(48)
+                  height: lv_pct(98)
+                  bg_opa: LV_OPA_TRANSP
+                  border_width: 0
+                  outline_width: 0       
+                  shadow_width: 0        
+                  radius: 0            
+                  pad_all: 2
+                  layout:
+                    type: flex
+                    flex_flow: LV_FLEX_FLOW_COLUMN
+                    flex_align_main: LV_FLEX_ALIGN_SPACE_EVENLY
+                    flex_align_cross: LV_FLEX_ALIGN_CENTER
+
+
+                            
+                  widgets:
+                                # Button 1 Shed Door 1
+                    - button:  
+                        id: btn_shed_door
+                        width: lv_pct(100)
+                        height: lv_pct(19)
+                        bg_opa: LV_OPA_TRANSP
+                        border_width: 0
+                        outline_width: 0
+                        shadow_width: 0
+                        radius: 0
+                        pad_all: 0
+                        layout:
+                          type: flex
+                          flex_flow: LV_FLEX_FLOW_COLUMN
+                          flex_align_main: LV_FLEX_ALIGN_CENTER
+                          flex_align_cross: LV_FLEX_ALIGN_CENTER
+                        on_click:
+                          - homeassistant.service:
+                              service: cover.toggle
+                              data:
+                                entity_id: cover.shed_door_1_4
+                        widgets:
+                          - label:
+                              id: shed_garage_icon_1
+                              width: lv_pct(100)
+                              text_font: mdi_garage
+                              text: "\U000F12D3"   
+                              text_align: CENTER
+                          - label: 
+                              width: lv_pct(100)
+                              text: "Door #1" 
+                              text_font: font_small
+                              text_align: CENTER
+                              pad_top: 1                            
+                          - label:
+                              id: shed_garage_status_1
+                              width: lv_pct(100)
+                              text_font: font_small
+                              text: "Closed"
+                              text_align: CENTER
+                              pad_top: 1
+ 
+
+                              # Button 2  Shed Door 2
+                    - button: 
+                        id: btn_shed_door_3
+                        width: lv_pct(100)
+                        height: lv_pct(19)
+                        bg_opa: LV_OPA_TRANSP
+                        border_width: 0
+                        outline_width: 0
+                        shadow_width: 0
+                        radius: 0
+                        pad_all: 0
+                        layout:
+                          type: flex
+                          flex_flow: LV_FLEX_FLOW_COLUMN
+                          flex_align_main: LV_FLEX_ALIGN_CENTER
+                          flex_align_cross: LV_FLEX_ALIGN_CENTER
+                        on_click:
+                          - homeassistant.service:
+                              service: cover.toggle
+                              data:
+                                entity_id: cover.shed_door_3_6
+                        widgets:
+                          - label:
+                              id: shed_garage_icon_3
+                              width: lv_pct(100)
+                              text_font: mdi_garage
+                              text: "\U000F12D3"  
+                              text_align: CENTER
+                          - label: 
+                              width: lv_pct(100)
+                              text: "Door #3" 
+                              text_font: font_small
+                              text_align: CENTER
+                              pad_top: 1                              
+                          - label:
+                              id: shed_garage_status_3
+                              width: lv_pct(100)
+                              text_font: font_small
+                              text: "Closed"
+                              text_align: CENTER
+                              pad_top: 1
+
+
+                         # Button 3    Shed Door West
+                    - button:  
+                        id: btn_shed_door_5
+                        width: lv_pct(100)
+                        height: lv_pct(19)
+                        bg_opa: LV_OPA_TRANSP
+                        border_width: 0
+                        outline_width: 0
+                        shadow_width: 0
+                        radius: 0
+                        pad_all: 0
+                        layout:
+                          type: flex
+                          flex_flow: LV_FLEX_FLOW_COLUMN
+                          flex_align_main: LV_FLEX_ALIGN_CENTER
+                          flex_align_cross: LV_FLEX_ALIGN_CENTER
+                        on_click:
+                          - homeassistant.service:
+                              service: cover.toggle
+                              data:
+                                entity_id: cover.shed_door_west_3
+                        widgets:
+                          - label:
+                              id: shed_garage_icon_5
+                              width: lv_pct(100)
+                              text_font: mdi_garage
+                              text: "\U000F12D3" 
+                              text_align: CENTER
+                          - label: 
+                              width: lv_pct(100)
+                              text: "West Door" 
+                              text_font: font_small
+                              text_align: CENTER
+                              pad_top: 1                              
+                          - label:
+                              id: shed_garage_status_5
+                              width: lv_pct(100)
+                              text_font: font_small
+                              text: "Closed"
+                              text_align: CENTER
+                              pad_top: 1
+
+
+
+                              #    Button 4 Front Door Lock
+                    - button:    
+                        id: btn_front_door
+                        width: lv_pct(100)
+                        height: lv_pct(19)
+                        bg_opa: 0%
+                        border_width: 0
+                        outline_width: 0
+                        shadow_width: 0
+                        pad_all: 0
+                        widgets:
+                          - label:
+                              id: front_door_icon
+                              text_font: mdi_lock
+                              align: center 
+                              y: -35 
+                          - label:
+                              text: "Front Door"
+                              text_font: font_small
+                              align: center 
+                              y: 15 
+                          - label:
+                              id: front_door_status
+                              text: "Syncing..."
+                              text_font: font_small
+                              align: center 
+                              y: 40 
+                        on_click:
+                          - lambda: |-
+                              if (id(front_door_lock).state == lock::LOCK_STATE_LOCKED) {
+                                id(front_door_lock).unlock();
+                              } else {
+                                id(front_door_lock).lock();
+                              }
+
+
+
+                            #  Button 5 Shed West Door
+                    - button:
+                        id: btn_west_door
+                        width: lv_pct(100)
+                        height: lv_pct(19)
+                        bg_opa: 0%
+                        border_width: 0
+                        outline_width: 0
+                        shadow_width: 0
+                        pad_all: 0
+                        widgets:
+                          - label:
+                              id: west_door_icon
+                              text_font: mdi_lock
+                              align: center 
+                              y: -35 
+                          - label:
+                              text: "West Shed Door"
+                              text_font: font_small
+                              align: center 
+                              y: 15
+                          - label:
+                              id: west_door_status
+                              text: "Syncing..."
+                              text_font: font_small
+                              align: center 
+                              y: 40
+                        on_click:
+                          - lambda: |-
+                              if (id(shed_west_door).state == lock::LOCK_STATE_LOCKED) {
+                                id(shed_west_door).unlock();
+                              } else {
+                                id(shed_west_door).lock();
+                              }
+
+
+
+                         # Column 2
+              - obj:
+                  width: lv_pct(48)
+                  height: lv_pct(98)
+                  bg_opa: LV_OPA_TRANSP
+                  border_width: 0
+                  outline_width: 0       
+                  shadow_width: 0        
+                  radius: 0                          
+                  pad_all: 2
+                  layout:
+                    type: flex
+                    flex_flow: LV_FLEX_FLOW_COLUMN
+                    flex_align_main: LV_FLEX_ALIGN_SPACE_BETWEEN
+                    flex_align_cross: LV_FLEX_ALIGN_CENTER
+
+                  widgets:
+                                # Button 6  Shed Door 2
+                    - button:  
+                        id: btn_shed_door_2
+                        width: lv_pct(100)
+                        height: lv_pct(19)
+                        bg_opa: LV_OPA_TRANSP
+                        border_width: 0
+                        outline_width: 0
+                        shadow_width: 0
+                        radius: 0
+                        pad_all: 0
+                        layout:
+                          type: flex
+                          flex_flow: LV_FLEX_FLOW_COLUMN
+                          flex_align_main: LV_FLEX_ALIGN_CENTER
+                          flex_align_cross: LV_FLEX_ALIGN_CENTER
+                        on_click:
+                          - homeassistant.service:
+                              service: cover.toggle
+                              data:
+                                entity_id: cover.shed_door_2_5
+                        widgets:
+                          - label:
+                              id: shed_garage_icon_2
+                              width: lv_pct(100)
+                              text_font: mdi_garage
+                              text: "\U000F12D3"  
+                              text_align: CENTER
+                          - label: 
+                              width: lv_pct(100)
+                              text: "Door #2" 
+                              text_font: font_small
+                              text_align: CENTER
+                              pad_top: 1                              
+                          - label:
+                              id: shed_garage_status_2
+                              width: lv_pct(100)
+                              text_font: font_small
+                              text: "Closed"
+                              text_align: CENTER
+                              pad_top: 1
+
+                               # Button 7  Shed Door 4
+                    - button:  
+                        id: btn_shed_door_4
+                        width: lv_pct(100)
+                        height: lv_pct(19)
+                        bg_opa: LV_OPA_TRANSP
+                        border_width: 0
+                        outline_width: 0
+                        shadow_width: 0
+                        radius: 0
+                        pad_all: 0
+                        layout:
+                          type: flex
+                          flex_flow: LV_FLEX_FLOW_COLUMN
+                          flex_align_main: LV_FLEX_ALIGN_CENTER
+                          flex_align_cross: LV_FLEX_ALIGN_CENTER
+                        on_click:
+                          - homeassistant.service:
+                              service: cover.toggle
+                              data:
+                                entity_id: cover.shed_door_4_7
+                        widgets:
+                          - label:
+                              id: shed_garage_icon_4
+                              width: lv_pct(100)
+                              text_font: mdi_garage
+                              text: "\U000F12D3"   
+                              text_align: CENTER
+                          - label: 
+                              width: lv_pct(100)
+                              text: "Door #4" 
+                              text_font: font_small
+                              text_align: CENTER
+                              pad_top: 1                              
+                          - label:
+                              id: shed_garage_status_4
+                              width: lv_pct(100)
+                              text_font: font_small
+                              text: "Closed"
+                              text_align: CENTER
+                              pad_top: 1
+
+                               # Button 8    Shop Door
+                    - button:  
+                        id: btn_shop_door_6
+                        width: lv_pct(100)
+                        height: lv_pct(19)
+                        bg_opa: LV_OPA_TRANSP
+                        border_width: 0      
+                        outline_width: 0     
+                        shadow_width: 0      
+                        pad_all: 0           
+                        layout:
+                          type: flex
+                          flex_flow: LV_FLEX_FLOW_COLUMN
+                          flex_align_main: LV_FLEX_ALIGN_CENTER 
+                          flex_align_cross: LV_FLEX_ALIGN_CENTER 
+                        on_click:
+                          - homeassistant.service:
+                              service: cover.toggle
+                              data:
+                                entity_id: cover.shop_garage_door_shop_garage_door
+                        widgets:
+                          - label:
+                              id: shed_garage_icon_6
+                              width: lv_pct(100) 
+                              text_font: mdi_garage
+                              text: "\U000F12D3"
+                              text_align: CENTER 
+                          - label:
+                              width: lv_pct(100)
+                              text: "Shop Garage"
+                              text_font: font_small
+                              text_align: CENTER
+                              pad_top: 1
+                          - label:
+                              id: shed_garage_status_6
+                              width: lv_pct(100)
+                              text_font: font_small
+                              text: "Closed"
+                              text_align: CENTER
+                              pad_top: 1
+
+
+
+                    
+                              # Button 9   Back Door Lock
+                    - button:
+                        id: btn_back_door
+                        width: lv_pct(100)
+                        height: lv_pct(19)
+                        bg_opa: 0%
+                        border_width: 0
+                        outline_width: 0
+                        shadow_width: 0
+                        pad_all: 0
+                        widgets:
+                          - label:
+                              id: back_door_icon
+                              text_font: mdi_lock
+                              align: center 
+                              y: -35 
+                          - label:
+                              text: "Back Door"
+                              text_font: font_small
+                              align: center 
+                              y: 15 
+                          - label:
+                              id: back_door_status
+                              text: "Syncing..."
+                              text_font: font_small
+                              align: center 
+                              y: 40 
+                        on_click:
+                          - lambda: |-
+                              if (id(back_door_lock_proxy).state == lock::LOCK_STATE_LOCKED) {
+                                id(back_door_lock_proxy).unlock();
+                              } else {
+                                id(back_door_lock_proxy).lock();
+                              }
+
+
+                            #  Button 10    Shed East Door
+                    - button:
+                        id: btn_east_door
+                        width: lv_pct(100)
+                        height: lv_pct(19)
+                        bg_opa: 0%
+                        border_width: 0
+                        outline_width: 0
+                        shadow_width: 0
+                        pad_all: 0
+                        widgets:
+                          - label:
+                              id: east_door_icon
+                              text_font: mdi_lock
+                              align: center 
+                              y: -35 
+                          - label:
+                              text: "East Shed Door"
+                              text_font: font_small
+                              align: center 
+                              y: 15 
+                          - label:
+                              id: east_door_status
+                              text: "Syncing..."
+                              text_font: font_small
+                              align: center 
+                              y: 40 
+                        on_click:
+                          - lambda: |-
+                              if (id(shed_east_door).state == lock::LOCK_STATE_LOCKED) {
+                                id(shed_east_door).unlock();
+                              } else {
+                                id(shed_east_door).lock();
+                              }
